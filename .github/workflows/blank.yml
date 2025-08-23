@@ -246,10 +246,11 @@ jobs:
             echo "No valid URLs to archive for $binary_type" | tee -a archive_log_${binary_type}.txt
           fi
 
-      - name: Download valid packages
+      - name: Download and upload valid packages as artifacts
         if: steps.check-deploy.outputs.updated == 'true'
         run: |
           binary_type=${{ matrix.binary-type.name }}
+          version=${{ steps.check-deploy.outputs.version }}
           mkdir -p downloads/${binary_type}
           if [ -s valid_urls_${binary_type}.txt ]; then
             total_urls=$(wc -l < valid_urls_${binary_type}.txt)
@@ -258,17 +259,30 @@ jobs:
               [ -z "$url" ] && { echo "Skipping empty URL for download" | tee -a archive_log_${binary_type}.txt; continue; }
               url_count=$((url_count + 1))
               filename=$(basename "$url")
+              artifact_name="version-${version}-${filename}"
               echo "Downloading package ($url_count/$total_urls): $url" | tee -a archive_log_${binary_type}.txt
-              curl -s -L -o "downloads/${binary_type}/${filename}" "$url" --fail
+              curl -s -L -o "downloads/${binary_type}/${artifact_name}" "$url" --fail
               if [ $? -eq 0 ]; then
-                echo "Successfully downloaded package ($url_count/$total_urls): $url to downloads/${binary_type}/${filename}" | tee -a archive_log_${binary_type}.txt
+                echo "Successfully downloaded package ($url_count/$total_urls): $url to downloads/${binary_type}/${artifact_name}" | tee -a archive_log_${binary_type}.txt
+                echo "Uploading artifact: $artifact_name" | tee -a archive_log_${binary_type}.txt
+                echo "artifact_path=downloads/${binary_type}/${artifact_name}" >> $GITHUB_OUTPUT
+                echo "artifact_name=$artifact_name" >> $GITHUB_OUTPUT
               else
                 echo "Failed to download package ($url_count/$total_urls): $url" | tee -a archive_log_${binary_type}.txt
+                continue
               fi
             done < valid_urls_${binary_type}.txt
           else
             echo "No valid URLs to download for $binary_type" | tee -a archive_log_${binary_type}.txt
           fi
+
+      - name: Upload each package as a separate artifact
+        if: steps.check-deploy.outputs.updated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.check-deploy.outputs.artifact_name }}
+          path: ${{ steps.check-deploy.outputs.artifact_path }}
+          if-no-files-found: warn
 
       - name: Upload logs and valid URLs
         if: always()
@@ -279,10 +293,3 @@ jobs:
             deploy_log_${{ matrix.binary-type.name }}.txt
             valid_urls_${{ matrix.binary-type.name }}.txt
             archive_log_${{ matrix.binary-type.name }}.txt
-
-      - name: Upload downloaded packages
-        if: steps.check-deploy.outputs.updated == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages-${{ matrix.binary-type.name }}
-          path: downloads/${{ matrix.binary-type.name }}/*
