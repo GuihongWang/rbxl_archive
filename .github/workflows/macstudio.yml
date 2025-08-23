@@ -1,4 +1,4 @@
-name: Archive MacPlayer Deployments
+name: Archive MacStudio Deployments
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  archive-macplayer:
+  archive-macstudio:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -19,11 +19,6 @@ jobs:
           python-version: '3.10'
         continue-on-error: true
 
-      - name: Set up WARP
-        uses: fscarmen/warp-on-actions@v1.2
-        with:
-          stack: dual   # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
-
       - name: Install waybackpy
         run: |
           pip install waybackpy -U || echo "Failed to install waybackpy, continuing..."
@@ -32,9 +27,9 @@ jobs:
       - name: Download and check DeployHistory
         id: check-deploy
         run: |
-          binary_type=MacPlayer
+          binary_type=MacStudio
           deploy_url=https://setup.rbxcdn.com/mac/DeployHistory.txt
-          type_filter=Client
+          type_filter=Studio
           echo "Checking DeployHistory for $binary_type" | tee -a deploy_log_${binary_type}.txt
           
           # Try primary URL
@@ -87,14 +82,14 @@ jobs:
       - name: Validate and archive package URLs
         if: steps.check-deploy.outputs.updated == 'true' && steps.check-deploy.outputs.version != 'none'
         run: |
-          binary_type=MacPlayer
+          binary_type=MacStudio
           version=${{ steps.check-deploy.outputs.version }}
           blob_dir=/mac/
           echo "" > valid_urls_${binary_type}.txt
           echo "" > archive_log_${binary_type}.txt
           
           # Validate package
-          pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-RobloxPlayer.zip"
+          pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-RobloxStudioApp.zip"
           status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url" || echo "000")
           echo "Checking package (1/1): $pkg_url (status: $status)" | tee -a archive_log_${binary_type}.txt
           if [ "$status" == "200" ]; then
@@ -143,7 +138,7 @@ jobs:
       - name: Download valid packages
         if: steps.check-deploy.outputs.updated == 'true' && steps.check-deploy.outputs.version != 'none'
         run: |
-          binary_type=MacPlayer
+          binary_type=MacStudio
           mkdir -p downloads/${binary_type}
           if [ -s valid_urls_${binary_type}.txt ]; then
             total_urls=$(wc -l < valid_urls_${binary_type}.txt)
@@ -152,9 +147,7 @@ jobs:
               [ -z "$url" ] && { echo "Skipping empty URL for download" | tee -a archive_log_${binary_type}.txt; continue; }
               url_count=$((url_count + 1))
               filename=$(basename "$url")
-              echo "
-
-Downloading package ($url_count/$total_urls): $url" | tee -a archive_log_${binary_type}.txt
+              echo "Downloading package ($url_count/$total_urls): $url" | tee -a archive_log_${binary_type}.txt
               curl -s -L -o "downloads/${binary_type}/${filename}" "$url" || echo "Failed to download $url, continuing..."
               if [ $? -eq 0 ]; then
                 echo "Successfully downloaded package ($url_count/$total_urls): $url to downloads/${binary_type}/${filename}" | tee -a archive_log_${binary_type}.txt
@@ -169,17 +162,17 @@ Downloading package ($url_count/$total_urls): $url" | tee -a archive_log_${binar
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: logs-and-urls-MacPlayer
+          name: logs-and-urls-MacStudio
           path: |
-            deploy_log_MacPlayer.txt
-            valid_urls_MacPlayer.txt
-            archive_log_MacPlayer.txt
+            deploy_log_MacStudio.txt
+            valid_urls_MacStudio.txt
+            archive_log_MacStudio.txt
         continue-on-error: true
 
       - name: Upload downloaded packages
         if: steps.check-deploy.outputs.updated == 'true' && steps.check-deploy.outputs.version != 'none'
         uses: actions/upload-artifact@v4
         with:
-          name: packages-MacPlayer
-          path: downloads/MacPlayer/*
+          name: packages-MacStudio
+          path: downloads/MacStudio/*
         continue-on-error: true
