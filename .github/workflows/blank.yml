@@ -129,6 +129,10 @@ jobs:
             exit 1
           fi
 
+          # 记录 DeployHistory.txt 最后十行以便调试
+          echo "Last 10 lines of DeployHistory_${binary_type}.txt:" | tee -a deploy_log_${binary_type}.txt
+          tail -n 10 DeployHistory_${binary_type}.txt >> deploy_log_${binary_type}.txt
+
           hash=$(md5sum DeployHistory_${binary_type}.txt | awk '{print $1}')
           echo "$binary_type Hash: $hash" | tee -a deploy_log_${binary_type}.txt
 
@@ -179,23 +183,23 @@ jobs:
             if [ "$status" == "200" ]; then
               echo "Manifest found: $manifest_url" | tee -a archive_log_${binary_type}.txt
               echo "$manifest_url" >> valid_urls_${binary_type}.txt
-
-              # 验证包文件
-              echo "${{ matrix.binary-type.packages }}" | while read -r pkg; do
-                [ -z "$pkg" ] && continue
-                pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
-                pkg_status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
-                echo "Checking package ($((++package_count))/$((total_packages + 1))): $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
-                if [ "$pkg_status" == "200" ]; then
-                  echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
-                  echo "$pkg_url" >> valid_urls_${binary_type}.txt
-                else
-                  echo "Package not found: $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
-                fi
-              done
             else
               echo "Manifest not found: $manifest_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             fi
+
+            # 验证包文件
+            echo "${{ matrix.binary-type.packages }}" | while read -r pkg; do
+              [ -z "$pkg" ] && continue
+              pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
+              pkg_status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
+              echo "Checking package ($((++package_count))/$((total_packages + 1))): $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
+              if [ "$pkg_status" == "200" ]; then
+                echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
+                echo "$pkg_url" >> valid_urls_${binary_type}.txt
+              else
+                echo "Package not found: $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
+              fi
+            done
           else
             # MacPlayer 或 MacStudio
             pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${{ matrix.binary-type.packages }}"
@@ -209,8 +213,10 @@ jobs:
             fi
           fi
 
-          # 存档有效 URL，每次处理一个，等待 60 秒
+          # 过滤空行并存档有效 URL，每次处理一个，等待 5 分钟
           if [ -s valid_urls_${binary_type}.txt ]; then
+            grep -v '^$' valid_urls_${binary_type}.txt > valid_urls_${binary_type}_filtered.txt
+            mv valid_urls_${binary_type}_filtered.txt valid_urls_${binary_type}.txt
             total_urls=$(wc -l < valid_urls_${binary_type}.txt)
             url_count=0
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -223,7 +229,7 @@ jobs:
                 echo "Successfully archived URL $url_count/$total_urls: $url" | tee -a archive_log_${binary_type}.txt
               else
                 echo "Failed to archive URL $url_count/$total_urls: $url, retrying..." | tee -a archive_log_${binary_type}.txt
-                sleep 30
+                sleep 60
                 python -c "import waybackpy; wb = waybackpy.Url('$url', '$user_agent'); archive = wb.save(); print(f'Archived URL: {archive}')" >> archive_log_${binary_type}.txt 2>&1
                 if [ $? -eq 0 ]; then
                   echo "Successfully archived URL $url_count/$total_urls on retry: $url" | tee -a archive_log_${binary_type}.txt
@@ -232,8 +238,8 @@ jobs:
                 fi
               fi
               if [ $url_count -lt $total_urls ]; then
-                echo "Waiting 60 seconds before next URL" | tee -a archive_log_${binary_type}.txt
-                sleep 60
+                echo "Waiting 300 seconds (5 minutes) before next URL" | tee -a archive_log_${binary_type}.txt
+                sleep 300
               fi
             done < valid_urls_${binary_type}.txt
           else
