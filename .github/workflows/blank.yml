@@ -142,7 +142,7 @@ jobs:
             fi
           else
             echo "$binary_type DeployHistory first run" | tee -a deploy_log_${binary_type}.txt
-            echo "updated=true" | tee -a deploy_log_${binary_type}.txt
+            echo "updated=true" >> $GITHUB_OUTPUT
           fi
           echo "$hash" > last_${binary_type}_hash.txt
           if [ -n "$type_filter" ]; then
