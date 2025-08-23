@@ -103,14 +103,12 @@ jobs:
       - name: Install waybackpy
         run: |
           pip install waybackpy -U
-
       - name: Download and check DeployHistory
         id: check-deploy
         run: |
           binary_type=${{ matrix.binary-type.name }}
           deploy_url=${{ matrix.binary-type.deploy-url }}
           type_filter=${{ matrix.binary-type.type-filter }}
-
           # 尝试主 URL
           http_status=$(curl -s -w "%{http_code}" -o DeployHistory_${binary_type}.txt "$deploy_url")
           echo "HTTP status for $deploy_url: $http_status" | tee -a deploy_log_${binary_type}.txt
@@ -128,14 +126,11 @@ jobs:
             echo "Error: DeployHistory for $binary_type is empty" | tee -a deploy_log_${binary_type}.txt
             exit 1
           fi
-
           # 记录 DeployHistory.txt 最后十行以便调试
           echo "Last 10 lines of DeployHistory_${binary_type}.txt:" | tee -a deploy_log_${binary_type}.txt
           tail -n 10 DeployHistory_${binary_type}.txt >> deploy_log_${binary_type}.txt
-
           hash=$(md5sum DeployHistory_${binary_type}.txt | awk '{print $1}')
           echo "$binary_type Hash: $hash" | tee -a deploy_log_${binary_type}.txt
-
           if [ -f "last_${binary_type}_hash.txt" ]; then
             last_hash=$(cat last_${binary_type}_hash.txt)
             if [ "$hash" != "$last_hash" ]; then
@@ -149,22 +144,18 @@ jobs:
             echo "$binary_type DeployHistory first run" | tee -a deploy_log_${binary_type}.txt
             echo "updated=true" >> $GITHUB_OUTPUT
           fi
-
           echo "$hash" > last_${binary_type}_hash.txt
-
           if [ -n "$type_filter" ]; then
             version=$(grep "New $type_filter" DeployHistory_${binary_type}.txt | grep -o 'version-[0-9a-f]\{16\}' | tail -n 1)
           else
             version=$(grep -o 'version-[0-9a-f]\{16\}' DeployHistory_${binary_type}.txt | tail -n 1)
           fi
-
           if [ -z "$version" ]; then
             echo "Error: No valid version-hash found in DeployHistory for $binary_type" | tee -a deploy_log_${binary_type}.txt
             exit 1
           fi
           echo "$binary_type Latest Version: $version" | tee -a deploy_log_${binary_type}.txt
           echo "version=$version" >> $GITHUB_OUTPUT
-
       - name: Validate and archive package URLs
         if: steps.check-deploy.outputs.updated == 'true'
         run: |
@@ -173,7 +164,6 @@ jobs:
           blob_dir=${{ matrix.binary-type.blob-dir }}
           echo "" > valid_urls_${binary_type}.txt
           echo "" > archive_log_${binary_type}.txt
-
           if [[ "$binary_type" == "WindowsPlayer" || "$binary_type" == "WindowsStudio64" ]]; then
             manifest_url="https://setup.rbxcdn.com${blob_dir}${version}-rbxPkgManifest.txt"
             total_packages=$(echo "${{ matrix.binary-type.packages }}" | grep -v '^$' | wc -l)
@@ -186,7 +176,6 @@ jobs:
             else
               echo "Manifest not found: $manifest_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             fi
-
             # 验证包文件
             echo "${{ matrix.binary-type.packages }}" | while read -r pkg; do
               [ -z "$pkg" ] && continue
@@ -212,7 +201,6 @@ jobs:
               echo "Package not found: $pkg_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             fi
           fi
-
           # 过滤空行并存档有效 URL，每次处理一个，等待 5 分钟
           if [ -s valid_urls_${binary_type}.txt ]; then
             grep -v '^$' valid_urls_${binary_type}.txt > valid_urls_${binary_type}_filtered.txt
@@ -245,7 +233,6 @@ jobs:
           else
             echo "No valid URLs to archive for $binary_type" | tee -a archive_log_${binary_type}.txt
           fi
-
       - name: Download valid packages
         if: steps.check-deploy.outputs.updated == 'true'
         run: |
@@ -269,7 +256,6 @@ jobs:
           else
             echo "No valid URLs to download for $binary_type" | tee -a archive_log_${binary_type}.txt
           fi
-
       - name: Upload logs and valid URLs
         if: always()
         uses: actions/upload-artifact@v4
@@ -279,7 +265,6 @@ jobs:
             deploy_log_${{ matrix.binary-type.name }}.txt
             valid_urls_${{ matrix.binary-type.name }}.txt
             archive_log_${{ matrix.binary-type.name }}.txt
-
       - name: Upload downloaded packages
         if: steps.check-deploy.outputs.updated == 'true'
         uses: actions/upload-artifact@v4
