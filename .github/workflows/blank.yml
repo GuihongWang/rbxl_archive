@@ -235,8 +235,8 @@ jobs:
                 else
                   echo "Failed to archive URL $url_count/$total_urls: $url (attempt $attempt)" | tee -a archive_log_${binary_type}.txt
                   if [ $attempt -lt 3 ]; then
-                    echo "Retrying in 60 seconds..." | tee -a archive_log_${binary_type}.txt
-                    sleep 60
+                    echo "Retrying in 300 seconds..." | tee -a archive_log_${binary_type}.txt
+                    sleep 300
                   fi
                 fi
               done
