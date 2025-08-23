@@ -89,7 +89,7 @@ jobs:
             blob-dir: /mac/
             type-filter: Studio
             packages: RobloxStudioApp.zip
-      fail-fast: false # 禁用 fail-fast，确保一个任务失败不取消其他任务
+      fail-fast: false # 禁用 fail-fast
 
     steps:
       - name: Checkout repository
@@ -113,12 +113,13 @@ jobs:
 
           # 下载 DeployHistory.txt 并检查 HTTP 状态码
           http_status=$(curl -s -w "%{http_code}" -o DeployHistory_${binary_type}.txt "$deploy_url")
+          echo "HTTP status for $deploy_url: $http_status" | tee -a deploy_log_${binary_type}.txt
           if [ "$http_status" != "200" ]; then
-            echo "Error: Failed to download DeployHistory for $binary_type (HTTP status: $http_status)"
+            echo "Error: Failed to download DeployHistory for $binary_type (HTTP status: $http_status)" | tee -a deploy_log_${binary_type}.txt
             exit 1
           fi
           if [ ! -s DeployHistory_${binary_type}.txt ]; then
-            echo "Error: DeployHistory for $binary_type is empty"
+            echo "Error: DeployHistory for $binary_type is empty" | tee -a deploy_log_${binary_type}.txt
             exit 1
           fi
 
@@ -166,6 +167,7 @@ jobs:
           if [[ "$binary_type" == "WindowsPlayer" || "$binary_type" == "WindowsStudio64" ]]; then
             manifest_url="https://setup.rbxcdn.com${blob_dir}${version}-rbxPkgManifest.txt"
             status=$(curl -s -I -o /dev/null -w "%{http_code}" "$manifest_url")
+            echo "Checking manifest: $manifest_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             if [ "$status" == "200" ]; then
               echo "Manifest found: $manifest_url" | tee -a archive_log_${binary_type}.txt
               echo "$manifest_url" >> valid_urls_${binary_type}.txt
@@ -175,6 +177,7 @@ jobs:
                 [ -z "$pkg" ] && continue
                 pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
                 pkg_status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
+                echo "Checking package: $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
                 if [ "$pkg_status" == "200" ]; then
                   echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
                   echo "$pkg_url" >> valid_urls_${binary_type}.txt
@@ -189,6 +192,7 @@ jobs:
             # MacPlayer 或 MacStudio
             pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${{ matrix.binary-type.packages }}"
             status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
+            echo "Checking package: $pkg_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             if [ "$status" == "200" ]; then
               echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
               echo "$pkg_url" >> valid_urls_${binary_type}.txt
@@ -199,23 +203,28 @@ jobs:
 
           # 存档有效 URL，每次处理一个，等待 60 秒
           if [ -s valid_urls_${binary_type}.txt ]; then
+            total_urls=$(wc -l < valid_urls_${binary_type}.txt)
+            url_count=0
             while read -r url; do
-              echo "Archiving $url to archive.org" | tee -a archive_log_${binary_type}.txt
+              url_count=$((url_count + 1))
+              echo "Archiving URL $url_count/$total_urls: $url" | tee -a archive_log_${binary_type}.txt
               waybackpy --url "$url" --save > archive_result.txt 2>&1
               if [ $? -eq 0 ]; then
-                echo "Successfully archived: $url" | tee -a archive_log_${binary_type}.txt
+                echo "Successfully archived URL $url_count/$total_urls: $url" | tee -a archive_log_${binary_type}.txt
               else
-                echo "Failed to archive $url, retrying..." | tee -a archive_log_${binary_type}.txt
+                echo "Failed to archive URL $url_count/$total_urls: $url, retrying..." | tee -a archive_log_${binary_type}.txt
                 sleep 10
                 waybackpy --url "$url" --save > archive_result.txt 2>&1
                 if [ $? -eq 0 ]; then
-                  echo "Successfully archived on retry: $url" | tee -a archive_log_${binary_type}.txt
+                  echo "Successfully archived URL $url_count/$total_urls on retry: $url" | tee -a archive_log_${binary_type}.txt
                 else
-                  echo "Failed to archive $url after retry" | tee -a archive_log_${binary_type}.txt
+                  echo "Failed to archive URL $url_count/$total_urls after retry: $url" | tee -a archive_log_${binary_type}.txt
                 fi
               fi
-              echo "Waiting 60 seconds before next URL" | tee -a archive_log_${binary_type}.txt
-              sleep 60
+              if [ $url_count -lt $total_urls ]; then
+                echo "Waiting 60 seconds before next URL" | tee -a archive_log_${binary_type}.txt
+                sleep 60
+              fi
             done < valid_urls_${binary_type}.txt
           else
             echo "No valid URLs to archive for $binary_type" | tee -a archive_log_${binary_type}.txt
@@ -230,3 +239,4 @@ jobs:
             deploy_log_${{ matrix.binary-type.name }}.txt
             valid_urls_${{ matrix.binary-type.name }}.txt
             archive_log_${{ matrix.binary-type.name }}.txt
+            archive_result.txt
