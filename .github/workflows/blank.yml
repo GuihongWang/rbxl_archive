@@ -90,7 +90,6 @@ jobs:
             type-filter: Studio
             packages: RobloxStudioApp.zip
       fail-fast: false # 禁用 fail-fast
-      max-parallel: 5 # 限制同时运行 5 个矩阵任务
 
     steps:
       - name: Checkout repository
@@ -179,6 +178,7 @@ jobs:
             else
               echo "Manifest not found: $manifest_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             fi
+            # 验证包文件
             echo "${{ matrix.binary-type.packages }}" | while read -r pkg; do
               [ -z "$pkg" ] && continue
               pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
@@ -192,6 +192,7 @@ jobs:
               fi
             done
           else
+            # MacPlayer 或 MacStudio
             pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${{ matrix.binary-type.packages }}"
             status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
             echo "Checking package (1/1): $pkg_url (status: $status)" | tee -a archive_log_${binary_type}.txt
@@ -202,6 +203,7 @@ jobs:
               echo "Package not found: $pkg_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             fi
           fi
+          # 过滤空行并存档有效 URL，每次处理一个，等待 5 分钟
           if [ -s valid_urls_${binary_type}.txt ]; then
             grep -v '^$' valid_urls_${binary_type}.txt > valid_urls_${binary_type}_filtered.txt
             mv valid_urls_${binary_type}_filtered.txt valid_urls_${binary_type}.txt
