@@ -1,0 +1,206 @@
+```yaml
+name: Archive Roblox Deployments
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 每天运行一次
+  workflow_dispatch:
+
+jobs:
+  archive-deployments:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        binary-type:
+          - name: WindowsPlayer
+            deploy-url: https://setup.rbxcdn.com/DeployHistory.txt
+            blob-dir: /
+            type-filter: WindowsPlayer
+            packages: |
+              RobloxApp.zip
+              redist.zip
+              shaders.zip
+              ssl.zip
+              WebView2.zip
+              WebView2RuntimeInstaller.zip
+              content-avatar.zip
+              content-configs.zip
+              content-fonts.zip
+              content-sky.zip
+              content-sounds.zip
+              content-textures2.zip
+              content-models.zip
+              content-platform-fonts.zip
+              content-platform-dictionaries.zip
+              content-terrain.zip
+              content-textures3.zip
+              extracontent-luapackages.zip
+              extracontent-translations.zip
+              extracontent-models.zip
+              extracontent-textures.zip
+              extracontent-places.zip
+          - name: WindowsStudio64
+            deploy-url: https://setup.rbxcdn.com/DeployHistory.txt
+            blob-dir: /
+            type-filter: Studio64
+            packages: |
+              RobloxStudio.zip
+              RibbonConfig.zip
+              redist.zip
+              Libraries.zip
+              LibrariesQt5.zip
+              WebView2.zip
+              WebView2RuntimeInstaller.zip
+              shaders.zip
+              ssl.zip
+              Qml.zip
+              Plugins.zip
+              StudioFonts.zip
+              BuiltInPlugins.zip
+              ApplicationConfig.zip
+              BuiltInStandalonePlugins.zip
+              content-qt_translations.zip
+              content-sky.zip
+              content-fonts.zip
+              content-avatar.zip
+              content-models.zip
+              content-sounds.zip
+              content-configs.zip
+              content-api-docs.zip
+              content-textures2.zip
+              content-studio_svg_textures.zip
+              content-platform-fonts.zip
+              content-platform-dictionaries.zip
+              content-terrain.zip
+              content-textures3.zip
+              extracontent-translations.zip
+              extracontent-luapackages.zip
+              extracontent-textures.zip
+              extracontent-scripts.zip
+              extracontent-models.zip
+              studiocontent-models.zip
+              studiocontent-textures.zip
+          - name: MacPlayer
+            deploy-url: https://setup.rbxcdn.com/mac/DeployHistory.txt
+            blob-dir: /mac/
+            type-filter: Client
+            packages: RobloxPlayer.zip
+          - name: MacStudio
+            deploy-url: https://setup.rbxcdn.com/mac/DeployHistory.txt
+            blob-dir: /mac/
+            type-filter: Studio
+            packages: RobloxStudioApp.zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install waybackpy
+        run: |
+          pip install waybackpy -U
+
+      - name: Download and check DeployHistory
+        id: check-deploy
+        run: |
+          binary_type=${{ matrix.binary-type.name }}
+          deploy_url=${{ matrix.binary-type.deploy-url }}
+          type_filter=${{ matrix.binary-type.type-filter }}
+
+          curl -s -o DeployHistory_${binary_type}.txt "$deploy_url"
+          if [ ! -s DeployHistory_${binary_type}.txt ]; then
+            echo "Error: Failed to download DeployHistory for $binary_type or file is empty"
+            exit 1
+          fi
+
+          hash=$(md5sum DeployHistory_${binary_type}.txt | awk '{print $1}')
+          echo "$binary_type Hash: $hash"
+
+          if [ -f "last_${binary_type}_hash.txt" ]; then
+            last_hash=$(cat last_${binary_type}_hash.txt)
+            if [ "$hash" != "$last_hash" ]; then
+              echo "$binary_type DeployHistory updated!"
+              echo "updated=true" >> $GITHUB_OUTPUT
+            else
+              echo "updated=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "updated=true" >> $GITHUB_OUTPUT
+          fi
+
+          echo "$hash" > last_${binary_type}_hash.txt
+
+          if [ -n "$type_filter" ]; then
+            version=$(grep "New $type_filter" DeployHistory_${binary_type}.txt | grep -o 'version-[0-9a-f]\{16\}' | tail -n 1)
+          else
+            version=$(grep -o 'version-[0-9a-f]\{16\}' DeployHistory_${binary_type}.txt | tail -n 1)
+          fi
+
+          if [ -z "$version" ]; then
+            echo "Error: No valid version-hash found in DeployHistory for $binary_type"
+            exit 1
+          fi
+          echo "$binary_type Latest Version: $version"
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Validate and archive package URLs
+        if: steps.check-deploy.outputs.updated == 'true'
+        run: |
+          binary_type=${{ matrix.binary-type.name }}
+          version=${{ steps.check-deploy.outputs.version }}
+          blob_dir=${{ matrix.binary-type.blob-dir }}
+          echo "" > valid_urls_${binary_type}.txt
+
+          if [[ "$binary_type" == "WindowsPlayer" || "$binary_type" == "WindowsStudio64" ]]; then
+            manifest_url="https://setup.rbxcdn.com${blob_dir}${version}-rbxPkgManifest.txt"
+            status=$(curl -s -I -o /dev/null -w "%{http_code}" "$manifest_url")
+            if [ "$status" == "200" ]; then
+              echo "Manifest found: $manifest_url"
+              echo "$manifest_url" >> valid_urls_${binary_type}.txt
+
+              # 验证包文件
+              echo "${{ matrix.binary-type.packages }}" | while read -r pkg; do
+                [ -z "$pkg" ] && continue
+                pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
+                pkg_status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
+                if [ "$pkg_status" == "200" ]; then
+                  echo "Valid package: $pkg_url"
+                  echo "$pkg_url" >> valid_urls_${binary_type}.txt
+                else
+                  echo "Package not found: $pkg_url (status: $pkg_status)"
+                fi
+              done
+            else
+              echo "Manifest not found: $manifest_url (status: $status)"
+            fi
+          else
+            # MacPlayer 或 MacStudio
+            pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${{ matrix.binary-type.packages }}"
+            status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
+            if [ "$status" == "200" ]; then
+              echo "Valid package: $pkg_url"
+              echo "$pkg_url" >> valid_urls_${binary_type}.txt
+            else
+              echo "Package not found: $pkg_url (status: $status)"
+            fi
+          fi
+
+          if [ -s valid_urls_${binary_type}.txt ]; then
+            while read -r url; do
+              echo "Archiving $url to archive.org"
+              waybackpy --url "$url" --save || (sleep 5 && waybackpy --url "$url" --save)
+            done < valid_urls_${binary_type}.txt
+          else
+            echo "No valid URLs to archive for $binary_type"
+          fi
+
+      - name: Upload valid URLs
+        uses: actions/upload-artifact@v4
+        with:
+          name: valid-urls-${{ matrix.binary-type.name }}
+          path: valid_urls_${{ matrix.binary-type.name }}.txt
+```
