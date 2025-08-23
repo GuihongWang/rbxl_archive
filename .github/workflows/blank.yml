@@ -1,9 +1,8 @@
-```yaml
 name: Archive Roblox Deployments
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 每天运行一次
+    - cron: "0 0 * * *" # 每天运行一次
   workflow_dispatch:
 
 jobs:
@@ -98,7 +97,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install waybackpy
         run: |
@@ -154,12 +153,13 @@ jobs:
           version=${{ steps.check-deploy.outputs.version }}
           blob_dir=${{ matrix.binary-type.blob-dir }}
           echo "" > valid_urls_${binary_type}.txt
+          echo "" > archive_log_${binary_type}.txt
 
           if [[ "$binary_type" == "WindowsPlayer" || "$binary_type" == "WindowsStudio64" ]]; then
             manifest_url="https://setup.rbxcdn.com${blob_dir}${version}-rbxPkgManifest.txt"
             status=$(curl -s -I -o /dev/null -w "%{http_code}" "$manifest_url")
             if [ "$status" == "200" ]; then
-              echo "Manifest found: $manifest_url"
+              echo "Manifest found: $manifest_url" | tee -a archive_log_${binary_type}.txt
               echo "$manifest_url" >> valid_urls_${binary_type}.txt
 
               # 验证包文件
@@ -168,39 +168,53 @@ jobs:
                 pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
                 pkg_status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
                 if [ "$pkg_status" == "200" ]; then
-                  echo "Valid package: $pkg_url"
+                  echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
                   echo "$pkg_url" >> valid_urls_${binary_type}.txt
                 else
-                  echo "Package not found: $pkg_url (status: $pkg_status)"
+                  echo "Package not found: $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
                 fi
               done
             else
-              echo "Manifest not found: $manifest_url (status: $status)"
+              echo "Manifest not found: $manifest_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             fi
           else
             # MacPlayer 或 MacStudio
             pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${{ matrix.binary-type.packages }}"
             status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
             if [ "$status" == "200" ]; then
-              echo "Valid package: $pkg_url"
+              echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
               echo "$pkg_url" >> valid_urls_${binary_type}.txt
             else
-              echo "Package not found: $pkg_url (status: $status)"
+              echo "Package not found: $pkg_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             fi
           fi
 
+          # 存档有效 URL
           if [ -s valid_urls_${binary_type}.txt ]; then
             while read -r url; do
-              echo "Archiving $url to archive.org"
-              waybackpy --url "$url" --save || (sleep 5 && waybackpy --url "$url" --save)
+              echo "Archiving $url to archive.org" | tee -a archive_log_${binary_type}.txt
+              waybackpy --url "$url" --save > archive_result.txt 2>&1
+              if [ $? -eq 0 ]; then
+                echo "Successfully archived: $url" | tee -a archive_log_${binary_type}.txt
+              else
+                echo "Failed to archive $url, retrying..." | tee -a archive_log_${binary_type}.txt
+                sleep 10
+                waybackpy --url "$url" --save > archive_result.txt 2>&1
+                if [ $? -eq 0 ]; then
+                  echo "Successfully archived on retry: $url" | tee -a archive_log_${binary_type}.txt
+                else
+                  echo "Failed to archive $url after retry" | tee -a archive_log_${binary_type}.txt
+                fi
+              fi
             done < valid_urls_${binary_type}.txt
           else
-            echo "No valid URLs to archive for $binary_type"
+            echo "No valid URLs to archive for $binary_type" | tee -a archive_log_${binary_type}.txt
           fi
 
-      - name: Upload valid URLs
+      - name: Upload valid URLs and archive log
         uses: actions/upload-artifact@v4
         with:
-          name: valid-urls-${{ matrix.binary-type.name }}
-          path: valid_urls_${{ matrix.binary-type.name }}.txt
-```
+          name: valid-urls-and-log-${{ matrix.binary-type.name }}
+          path: |
+            valid_urls_${{ matrix.binary-type.name }}.txt
+            archive_log_${{ matrix.binary-type.name }}.txt
