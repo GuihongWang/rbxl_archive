@@ -20,10 +20,9 @@ jobs:
         continue-on-error: true
 
       - name: Set up WARP
-        uses: fscarmen/warp-on-actions@v1.3
+        uses: fscarmen/warp-on-actions@v1.2
         with:
-         stack: dual        # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
-         mode: wireguard    # Optional. Support [ wireguard, client ]. Default is wireguard.
+          stack: dual   # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
 
       - name: Install waybackpy
         run: |
