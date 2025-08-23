@@ -111,12 +111,18 @@ jobs:
           deploy_url=${{ matrix.binary-type.deploy-url }}
           type_filter=${{ matrix.binary-type.type-filter }}
 
-          # 下载 DeployHistory.txt 并检查 HTTP 状态码
+          # 尝试主 URL
           http_status=$(curl -s -w "%{http_code}" -o DeployHistory_${binary_type}.txt "$deploy_url")
           echo "HTTP status for $deploy_url: $http_status" | tee -a deploy_log_${binary_type}.txt
           if [ "$http_status" != "200" ]; then
-            echo "Error: Failed to download DeployHistory for $binary_type (HTTP status: $http_status)" | tee -a deploy_log_${binary_type}.txt
-            exit 1
+            # 尝试备用路径
+            deploy_url="https://setup.rbxcdn.com/channel/common${{ matrix.binary-type.blob-dir }}DeployHistory.txt"
+            http_status=$(curl -s -w "%{http_code}" -o DeployHistory_${binary_type}.txt "$deploy_url")
+            echo "HTTP status for fallback $deploy_url: $http_status" | tee -a deploy_log_${binary_type}.txt
+            if [ "$http_status" != "200" ]; then
+              echo "Error: Failed to download DeployHistory for $binary_type (HTTP status: $http_status)" | tee -a deploy_log_${binary_type}.txt
+              exit 1
+            fi
           fi
           if [ ! -s DeployHistory_${binary_type}.txt ]; then
             echo "Error: DeployHistory for $binary_type is empty" | tee -a deploy_log_${binary_type}.txt
@@ -166,8 +172,10 @@ jobs:
 
           if [[ "$binary_type" == "WindowsPlayer" || "$binary_type" == "WindowsStudio64" ]]; then
             manifest_url="https://setup.rbxcdn.com${blob_dir}${version}-rbxPkgManifest.txt"
+            total_packages=$(echo "${{ matrix.binary-type.packages }}" | grep -v '^$' | wc -l)
+            package_count=0
             status=$(curl -s -I -o /dev/null -w "%{http_code}" "$manifest_url")
-            echo "Checking manifest: $manifest_url (status: $status)" | tee -a archive_log_${binary_type}.txt
+            echo "Checking manifest ($((++package_count))/$((total_packages + 1))): $manifest_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             if [ "$status" == "200" ]; then
               echo "Manifest found: $manifest_url" | tee -a archive_log_${binary_type}.txt
               echo "$manifest_url" >> valid_urls_${binary_type}.txt
@@ -177,7 +185,7 @@ jobs:
                 [ -z "$pkg" ] && continue
                 pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
                 pkg_status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
-                echo "Checking package: $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
+                echo "Checking package ($((++package_count))/$((total_packages + 1))): $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
                 if [ "$pkg_status" == "200" ]; then
                   echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
                   echo "$pkg_url" >> valid_urls_${binary_type}.txt
@@ -192,7 +200,7 @@ jobs:
             # MacPlayer 或 MacStudio
             pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${{ matrix.binary-type.packages }}"
             status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url")
-            echo "Checking package: $pkg_url (status: $status)" | tee -a archive_log_${binary_type}.txt
+            echo "Checking package (1/1): $pkg_url (status: $status)" | tee -a archive_log_${binary_type}.txt
             if [ "$status" == "200" ]; then
               echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
               echo "$pkg_url" >> valid_urls_${binary_type}.txt
@@ -205,16 +213,18 @@ jobs:
           if [ -s valid_urls_${binary_type}.txt ]; then
             total_urls=$(wc -l < valid_urls_${binary_type}.txt)
             url_count=0
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             while read -r url; do
+              [ -z "$url" ] && { echo "Skipping empty URL" | tee -a archive_log_${binary_type}.txt; continue; }
               url_count=$((url_count + 1))
               echo "Archiving URL $url_count/$total_urls: $url" | tee -a archive_log_${binary_type}.txt
-              waybackpy --url "$url" --save > archive_result.txt 2>&1
+              python -c "import waybackpy; wb = waybackpy.Url('$url', '$user_agent'); archive = wb.save(); print(f'Archived URL: {archive}')" >> archive_log_${binary_type}.txt 2>&1
               if [ $? -eq 0 ]; then
                 echo "Successfully archived URL $url_count/$total_urls: $url" | tee -a archive_log_${binary_type}.txt
               else
                 echo "Failed to archive URL $url_count/$total_urls: $url, retrying..." | tee -a archive_log_${binary_type}.txt
-                sleep 10
-                waybackpy --url "$url" --save > archive_result.txt 2>&1
+                sleep 30
+                python -c "import waybackpy; wb = waybackpy.Url('$url', '$user_agent'); archive = wb.save(); print(f'Archived URL: {archive}')" >> archive_log_${binary_type}.txt 2>&1
                 if [ $? -eq 0 ]; then
                   echo "Successfully archived URL $url_count/$total_urls on retry: $url" | tee -a archive_log_${binary_type}.txt
                 else
@@ -231,7 +241,7 @@ jobs:
           fi
 
       - name: Upload logs and valid URLs
-        if: always() # 即使失败也上传日志
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: logs-and-urls-${{ matrix.binary-type.name }}
@@ -239,4 +249,3 @@ jobs:
             deploy_log_${{ matrix.binary-type.name }}.txt
             valid_urls_${{ matrix.binary-type.name }}.txt
             archive_log_${{ matrix.binary-type.name }}.txt
-            archive_result.txt
