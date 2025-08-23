@@ -2,7 +2,7 @@ name: Archive Roblox Deployments
 
 on:
   schedule:
-    - cron: "0 0 * * *" # 每天运行一次
+    - cron: '0 0 * * *' # 每天运行一次
   workflow_dispatch:
 
 jobs:
@@ -89,6 +89,7 @@ jobs:
             blob-dir: /mac/
             type-filter: Studio
             packages: RobloxStudioApp.zip
+      fail-fast: false # 禁用 fail-fast，确保一个任务失败不取消其他任务
 
     steps:
       - name: Checkout repository
@@ -97,7 +98,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
       - name: Install waybackpy
         run: |
@@ -110,24 +111,31 @@ jobs:
           deploy_url=${{ matrix.binary-type.deploy-url }}
           type_filter=${{ matrix.binary-type.type-filter }}
 
-          curl -s -o DeployHistory_${binary_type}.txt "$deploy_url"
+          # 下载 DeployHistory.txt 并检查 HTTP 状态码
+          http_status=$(curl -s -w "%{http_code}" -o DeployHistory_${binary_type}.txt "$deploy_url")
+          if [ "$http_status" != "200" ]; then
+            echo "Error: Failed to download DeployHistory for $binary_type (HTTP status: $http_status)"
+            exit 1
+          fi
           if [ ! -s DeployHistory_${binary_type}.txt ]; then
-            echo "Error: Failed to download DeployHistory for $binary_type or file is empty"
+            echo "Error: DeployHistory for $binary_type is empty"
             exit 1
           fi
 
           hash=$(md5sum DeployHistory_${binary_type}.txt | awk '{print $1}')
-          echo "$binary_type Hash: $hash"
+          echo "$binary_type Hash: $hash" | tee -a deploy_log_${binary_type}.txt
 
           if [ -f "last_${binary_type}_hash.txt" ]; then
             last_hash=$(cat last_${binary_type}_hash.txt)
             if [ "$hash" != "$last_hash" ]; then
-              echo "$binary_type DeployHistory updated!"
+              echo "$binary_type DeployHistory updated!" | tee -a deploy_log_${binary_type}.txt
               echo "updated=true" >> $GITHUB_OUTPUT
             else
+              echo "$binary_type DeployHistory unchanged" | tee -a deploy_log_${binary_type}.txt
               echo "updated=false" >> $GITHUB_OUTPUT
             fi
           else
+            echo "$binary_type DeployHistory first run" | tee -a deploy_log_${binary_type}.txt
             echo "updated=true" >> $GITHUB_OUTPUT
           fi
 
@@ -140,10 +148,10 @@ jobs:
           fi
 
           if [ -z "$version" ]; then
-            echo "Error: No valid version-hash found in DeployHistory for $binary_type"
+            echo "Error: No valid version-hash found in DeployHistory for $binary_type" | tee -a deploy_log_${binary_type}.txt
             exit 1
           fi
-          echo "$binary_type Latest Version: $version"
+          echo "$binary_type Latest Version: $version" | tee -a deploy_log_${binary_type}.txt
           echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Validate and archive package URLs
@@ -189,7 +197,7 @@ jobs:
             fi
           fi
 
-          # 存档有效 URL
+          # 存档有效 URL，每次处理一个，等待 60 秒
           if [ -s valid_urls_${binary_type}.txt ]; then
             while read -r url; do
               echo "Archiving $url to archive.org" | tee -a archive_log_${binary_type}.txt
@@ -206,15 +214,19 @@ jobs:
                   echo "Failed to archive $url after retry" | tee -a archive_log_${binary_type}.txt
                 fi
               fi
+              echo "Waiting 60 seconds before next URL" | tee -a archive_log_${binary_type}.txt
+              sleep 60
             done < valid_urls_${binary_type}.txt
           else
             echo "No valid URLs to archive for $binary_type" | tee -a archive_log_${binary_type}.txt
           fi
 
-      - name: Upload valid URLs and archive log
+      - name: Upload logs and valid URLs
+        if: always() # 即使失败也上传日志
         uses: actions/upload-artifact@v4
         with:
-          name: valid-urls-and-log-${{ matrix.binary-type.name }}
+          name: logs-and-urls-${{ matrix.binary-type.name }}
           path: |
+            deploy_log_${{ matrix.binary-type.name }}.txt
             valid_urls_${{ matrix.binary-type.name }}.txt
             archive_log_${{ matrix.binary-type.name }}.txt
