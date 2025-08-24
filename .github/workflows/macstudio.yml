@@ -1,4 +1,4 @@
-name: Archive MacStudio Deployments
+name: Archive MacStudio Deployment
 
 on:
   schedule:
