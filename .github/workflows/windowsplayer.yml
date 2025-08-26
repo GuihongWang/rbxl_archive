@@ -113,8 +113,8 @@ jobs:
             # Log manifest content for debugging
             echo "Content of rbxPkgManifest.txt:" | tee -a archive_log_${binary_type}.txt
             cat rbxPkgManifest.txt >> archive_log_${binary_type}.txt
-            # Extract .zip filenames (any line ending with .zip)
-            packages=$(awk '/\.zip$/ {print $1}' rbxPkgManifest.txt | sort -u)
+            # Extract .zip filenames (every 5th line, starting from line 2)
+            packages=$(awk 'NR % 5 == 2 && /\.zip$/ {print $1}' rbxPkgManifest.txt | sort -u)
             total_packages=$(echo "$packages" | wc -l)
             if [ $total_packages -eq 0 ]; then
               echo "Warning: No .zip packages found in rbxPkgManifest.txt" | tee -a archive_log_${binary_type}.txt
@@ -155,7 +155,7 @@ jobs:
               # Run archiving in background
               {
                 for attempt in {1..3}; do
-                  waybackpy --url "$url" --user-agent "$user_agent" --save >> archive_log_${binary_type}.txt 2>&1
+                  waybackpy --url "$url" --user-agent "$user_agent" --archive >> archive_log_${binary_type}.txt 2>&1
                   if [ $? -eq 0 ]; then
                     echo "Successfully archived URL $url_count/$total_urls: $url (attempt $attempt)" | tee -a archive_log_${binary_type}.txt
                     echo "$url,SUCCESS,$attempt" >> archive_status_${binary_type}.txt
@@ -193,7 +193,7 @@ jobs:
             total_urls=$(wc -l < valid_urls_${binary_type}.txt)
             echo "Starting parallel download of $total_urls packages" | tee -a archive_log_${binary_type}.txt
             # Parallel download with xargs, limiting to 4 concurrent processes
-            cat valid_urls_${binary_type}.txt | xargs -I {} -P 4 bash -c '
+            cat valid_urls_${binary_type}.txt | grep -v "rbxPkgManifest.txt" | xargs -I {} -P 4 bash -c '
               url="{}"
               [ -z "$url" ] && { echo "Skipping empty URL for download" | tee -a archive_log_${binary_type}.txt; exit 0; }
               filename=$(basename "$url")
@@ -205,10 +205,7 @@ jobs:
             '
             # Validate checksums if available in manifest
             if [ -f rbxPkgManifest.txt ]; then
-              awk '/\.zip$/ {print $1}' rbxPkgManifest.txt | while read -r filename; do
-                # Find the hash in the next line
-                hash_line=$(( $(awk -v fname="$filename" 'NR==1,/^$/{if ($0==fname) {print NR}}' rbxPkgManifest.txt) + 1 ))
-                expected_hash=$(awk "NR==$hash_line {print \$1}" rbxPkgManifest.txt)
+              awk 'NR % 5 == 2 && /\.zip$/ {print $1, $(NR+1)}' rbxPkgManifest.txt | while read -r filename expected_hash; do
                 if [ -f "downloads/${binary_type}/${filename}" ]; then
                   actual_hash=$(md5sum "downloads/${binary_type}/${filename}" | awk '{print $1}')
                   if [ "$expected_hash" = "$actual_hash" ]; then
