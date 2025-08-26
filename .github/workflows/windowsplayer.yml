@@ -25,12 +25,6 @@ jobs:
           stack: dual   # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
 
 
-      - name: Set up WARP
-        uses: fscarmen/warp-on-actions@v1.2
-        with:
-          stack: dual   # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
-
-
       - name: Install waybackpy
         run: |
           pip install waybackpy -U || { echo "Failed to install waybackpy"; exit 1; }
@@ -125,7 +119,8 @@ jobs:
             if [ $total_packages -eq 0 ]; then
               echo "Warning: No .zip packages found in rbxPkgManifest.txt" | tee -a archive_log_${binary_type}.txt
             else
-              echo "Extracted $total_packages .zip packages: $packages" | tee -a archive_log_${binary_type}.txt
+              echo "Extracted $total_packages .zip packages:" | tee -a archive_log_${binary_type}.txt
+              echo "$packages" | tee -a archive_log_${binary_type}.txt
             fi
           else
             packages=""
@@ -142,6 +137,8 @@ jobs:
             if [ "$pkg_status" == "200" ]; then
               echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
               echo "$pkg_url" >> valid_urls_${binary_type}.txt
+            else
+              echo "Invalid package: $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
             fi
           done
 
@@ -198,7 +195,7 @@ jobs:
           if [ -s valid_urls_${binary_type}.txt ]; then
             total_urls=$(wc -l < valid_urls_${binary_type}.txt)
             echo "Starting parallel download of $total_urls packages" | tee -a archive_log_${binary_type}.txt
-            # Parallel download with xargs, limiting to 4 concurrent processes
+            # Parallel download with xargs, limiting to 4 concurrent processes, excluding manifest
             cat valid_urls_${binary_type}.txt | grep -v "rbxPkgManifest.txt" | xargs -I {} -P 4 bash -c '
               url="{}"
               [ -z "$url" ] && { echo "Skipping empty URL for download" | tee -a archive_log_${binary_type}.txt; exit 0; }
