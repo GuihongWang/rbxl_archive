@@ -114,7 +114,7 @@ jobs:
             echo "Content of rbxPkgManifest.txt:" | tee -a archive_log_${binary_type}.txt
             cat rbxPkgManifest.txt >> archive_log_${binary_type}.txt
             # Extract .zip filenames (every 5th line, starting from line 2)
-            packages=$(awk 'NR % 5 == 2 && /\.zip$/ {print $1}' rbxPkgManifest.txt | sort -u)
+            packages=$(awk 'NR % 5 == 2 && $1 ~ /\.zip$/ {print $1}' rbxPkgManifest.txt | sort -u)
             total_packages=$(echo "$packages" | wc -l)
             if [ $total_packages -eq 0 ]; then
               echo "Warning: No .zip packages found in rbxPkgManifest.txt" | tee -a archive_log_${binary_type}.txt
@@ -158,7 +158,7 @@ jobs:
               # Run archiving in background
               {
                 for attempt in {1..3}; do
-                  waybackpy --url "$url" --user-agent "$user_agent" --archive >> archive_log_${binary_type}.txt 2>&1
+                  waybackpy --url "$url" --user-agent "$user_agent" --save >> archive_log_${binary_type}.txt 2>&1
                   if [ $? -eq 0 ]; then
                     echo "Successfully archived URL $url_count/$total_urls: $url (attempt $attempt)" | tee -a archive_log_${binary_type}.txt
                     echo "$url,SUCCESS,$attempt" >> archive_status_${binary_type}.txt
@@ -208,7 +208,7 @@ jobs:
             '
             # Validate checksums if available in manifest
             if [ -f rbxPkgManifest.txt ]; then
-              awk 'NR % 5 == 2 && /\.zip$/ {print $1, $(NR+1)}' rbxPkgManifest.txt | while read -r filename expected_hash; do
+              awk 'NR % 5 == 2 && $1 ~ /\.zip$/ {print $1, $(NR+1)}' rbxPkgManifest.txt | while read -r filename expected_hash; do
                 if [ -f "downloads/${binary_type}/${filename}" ]; then
                   actual_hash=$(md5sum "downloads/${binary_type}/${filename}" | awk '{print $1}')
                   if [ "$expected_hash" = "$actual_hash" ]; then
