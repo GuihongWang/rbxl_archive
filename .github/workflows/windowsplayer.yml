@@ -25,7 +25,6 @@ jobs:
           stack: dual   # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
 
 
-
       - name: Install waybackpy
         run: |
           pip install waybackpy -U || { echo "Failed to install waybackpy"; exit 1; }
@@ -111,8 +110,13 @@ jobs:
             echo "$manifest_url" >> valid_urls_${binary_type}.txt
             # Download manifest to extract package list
             curl -s -o rbxPkgManifest.txt "$manifest_url"
-            packages=$(awk '/\.zip$/ {print $1}' rbxPkgManifest.txt | sort -u)
+            # Log manifest content for debugging
+            echo "Content of rbxPkgManifest.txt:" | tee -a archive_log_${binary_type}.txt
+            cat rbxPkgManifest.txt >> archive_log_${binary_type}.txt
+            # Extract .zip filenames (every 4th line starting from line 2, assuming format: filename, hash, size1, size2)
+            packages=$(awk 'NR % 4 == 2 && /\.zip$/ {print $1}' rbxPkgManifest.txt | sort -u)
             total_packages=$(echo "$packages" | wc -l)
+            echo "Extracted $total_packages .zip packages: $packages" | tee -a archive_log_${binary_type}.txt
           else
             packages=""
             total_packages=0
@@ -124,7 +128,7 @@ jobs:
           for pkg in $packages; do
             pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
             pkg_status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url" || echo "000")
-            echo "Checking package ($((++package_count))/$((total_packages + 1))): $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
+            echo "Checking package ($((++package_count))/$((total_packages))): $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
             if [ "$pkg_status" == "200" ]; then
               echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
               echo "$pkg_url" >> valid_urls_${binary_type}.txt
@@ -139,12 +143,12 @@ jobs:
             url_count=0
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             
-            # Process URLs in parallel with xargs, limiting to 4 concurrent processes
+            # Process URLs in parallel, limiting to 4 concurrent processes
             while IFS= read -r url; do
               [ -z "$url" ] && continue
               url_count=$((url_count + 1))
               echo "Archiving URL $url_count/$total_urls: $url" | tee -a archive_log_${binary_type}.txt
-              # Run archiving in background to allow parallel processing
+              # Run archiving in background
               {
                 for attempt in {1..3}; do
                   waybackpy --url "$url" --user-agent "$user_agent" --save >> archive_log_${binary_type}.txt 2>&1
@@ -197,9 +201,7 @@ jobs:
             '
             # Validate checksums if available in manifest
             if [ -f rbxPkgManifest.txt ]; then
-              while read -r line; do
-                filename=$(echo "$line" | awk '{print $1}')
-                expected_hash=$(echo "$line" | awk '{print $2}')
+              awk 'NR % 4 == 2 && /\.zip$/ {print $1, $(NR+1)}' rbxPkgManifest.txt | while read -r filename expected_hash; do
                 if [ -f "downloads/${binary_type}/${filename}" ]; then
                   actual_hash=$(md5sum "downloads/${binary_type}/${filename}" | awk '{print $1}')
                   if [ "$expected_hash" = "$actual_hash" ]; then
@@ -208,7 +210,7 @@ jobs:
                     echo "Checksum mismatch for $filename: expected $expected_hash, got $actual_hash" | tee -a archive_log_${binary_type}.txt
                   fi
                 fi
-              done < rbxPkgManifest.txt
+              done
             fi
           else
             echo "No valid URLs to download for $binary_type" | tee -a archive_log_${binary_type}.txt
