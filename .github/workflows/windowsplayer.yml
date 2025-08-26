@@ -113,10 +113,14 @@ jobs:
             # Log manifest content for debugging
             echo "Content of rbxPkgManifest.txt:" | tee -a archive_log_${binary_type}.txt
             cat rbxPkgManifest.txt >> archive_log_${binary_type}.txt
-            # Extract .zip filenames (every 4th line starting from line 2, assuming format: filename, hash, size1, size2)
-            packages=$(awk 'NR % 4 == 2 && /\.zip$/ {print $1}' rbxPkgManifest.txt | sort -u)
+            # Extract .zip filenames (any line ending with .zip)
+            packages=$(awk '/\.zip$/ {print $1}' rbxPkgManifest.txt | sort -u)
             total_packages=$(echo "$packages" | wc -l)
-            echo "Extracted $total_packages .zip packages: $packages" | tee -a archive_log_${binary_type}.txt
+            if [ $total_packages -eq 0 ]; then
+              echo "Warning: No .zip packages found in rbxPkgManifest.txt" | tee -a archive_log_${binary_type}.txt
+            else
+              echo "Extracted $total_packages .zip packages: $packages" | tee -a archive_log_${binary_type}.txt
+            fi
           else
             packages=""
             total_packages=0
@@ -128,7 +132,7 @@ jobs:
           for pkg in $packages; do
             pkg_url="https://setup.rbxcdn.com${blob_dir}${version}-${pkg}"
             pkg_status=$(curl -s -I -o /dev/null -w "%{http_code}" "$pkg_url" || echo "000")
-            echo "Checking package ($((++package_count))/$((total_packages))): $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
+            echo "Checking package ($((++package_count))/$total_packages): $pkg_url (status: $pkg_status)" | tee -a archive_log_${binary_type}.txt
             if [ "$pkg_status" == "200" ]; then
               echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
               echo "$pkg_url" >> valid_urls_${binary_type}.txt
@@ -201,7 +205,10 @@ jobs:
             '
             # Validate checksums if available in manifest
             if [ -f rbxPkgManifest.txt ]; then
-              awk 'NR % 4 == 2 && /\.zip$/ {print $1, $(NR+1)}' rbxPkgManifest.txt | while read -r filename expected_hash; do
+              awk '/\.zip$/ {print $1}' rbxPkgManifest.txt | while read -r filename; do
+                # Find the hash in the next line
+                hash_line=$(( $(awk -v fname="$filename" 'NR==1,/^$/{if ($0==fname) {print NR}}' rbxPkgManifest.txt) + 1 ))
+                expected_hash=$(awk "NR==$hash_line {print \$1}" rbxPkgManifest.txt)
                 if [ -f "downloads/${binary_type}/${filename}" ]; then
                   actual_hash=$(md5sum "downloads/${binary_type}/${filename}" | awk '{print $1}')
                   if [ "$expected_hash" = "$actual_hash" ]; then
@@ -224,8 +231,8 @@ jobs:
           valid_urls_count=$(wc -l < valid_urls_${binary_type}.txt 2>/dev/null || echo 0)
           archived_success_count=$(grep -c "SUCCESS" archive_status_${binary_type}.txt 2>/dev/null || echo 0)
           archived_failed_count=$(grep -c "FAILED" archive_status_${binary_type}.txt 2>/dev/null || echo 0)
-          downloaded_count=$(ls -1 downloads/${binary_type} 2>/dev/null | wc -l || echo 0)
-          echo "Summary: $valid_urls_count URLs validated, $archived_success_count URLs archived successfully, $archived_failed_count URLs failed to archive, $downloaded_count packages downloaded" | tee -a archive_log_${binary_type}.txt
+          downloaded_count=$(ls -1 downloads/${binary_type} 2>/dev/null | grep -v "rbxPkgManifest.txt" | wc -l || echo 0)
+          echo "Summary: $valid_urls_count URLs validated (including manifest), $archived_success_count URLs archived successfully, $archived_failed_count URLs failed to archive, $downloaded_count packages downloaded (excluding manifest)" | tee -a archive_log_${binary_type}.txt
           # Save metrics for historical tracking
           echo "$(date +%F),$valid_urls_count,$archived_success_count,$archived_failed_count,$downloaded_count" >> metrics_${binary_type}.csv
         continue-on-error: true
@@ -249,5 +256,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: packages-WindowsPlayer
-          path: downloads/WindowsPlayer/*
+          path: downloads/WindowsPlayer/*.zip
         continue-on-error: true
