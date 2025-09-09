@@ -5,6 +5,9 @@ on:
     - cron: '0 0 * * *' # Run daily
   workflow_dispatch:
 
+permissions:
+  contents: write # Required for creating releases
+
 jobs:
   archive-macplayer:
     runs-on: ubuntu-latest
@@ -180,4 +183,36 @@ jobs:
         with:
           name: packages-MacPlayer
           path: downloads/MacPlayer/*
+        continue-on-error: true
+
+      - name: Create and upload to release
+        if: steps.check-deploy.outputs.updated == 'true' && steps.check-deploy.outputs.version != 'none'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${{ steps.check-deploy.outputs.version }}
+          tag_name="MacPlayer-${version}"
+          
+          # Create release
+          gh release create "$tag_name" \
+            --title "$version" \
+            --notes "MacPlayer deployment artifacts for version $version" \
+            --draft=false \
+            || { echo "Failed to create release, continuing..."; exit 0; }
+          
+          # Upload log files
+          for file in deploy_log_MacPlayer.txt valid_urls_MacPlayer.txt archive_log_MacPlayer.txt; do
+            if [ -f "$file" ]; then
+              gh release upload "$tag_name" "$file" --clobber || echo "Failed to upload $file to release, continuing..."
+            fi
+          done
+          
+          # Upload downloaded packages
+          if [ -d "downloads/MacPlayer" ]; then
+            for file in downloads/MacPlayer/*; do
+              if [ -f "$file" ]; then
+                gh release upload "$tag_name" "$file" --clobber || echo "Failed to upload $file to release, continuing..."
+              fi
+            done
+          fi
         continue-on-error: true
