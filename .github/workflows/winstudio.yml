@@ -5,6 +5,9 @@ on:
     - cron: '0 0 * * *' # Run daily
   workflow_dispatch:
 
+permissions:
+  contents: write # Required for creating releases
+
 jobs:
   archive-windowsstudio:
     runs-on: ubuntu-latest
@@ -58,7 +61,7 @@ jobs:
             tail -n 10 DeployHistory_${binary_type}.txt >> deploy_log_${binary_type}.txt
             
             # Calculate hash
-            hash=$(md5sum DeployHistory_${binary_type}.txt | awk '{print $1}' || echo "unknown" )
+            hash=$(md5sum DeployHistory_${binary_type}.txt | awk '{print $1}' || echo "unknown")
             echo "$binary_type Hash: $hash" | tee -a deploy_log_${binary_type}.txt
             
             # Check for updates
@@ -195,4 +198,36 @@ jobs:
         with:
           name: packages-WindowsStudio64
           path: downloads/WindowsStudio64/*
+        continue-on-error: true
+
+      - name: Create and upload to release
+        if: steps.check-deploy.outputs.updated == 'true' && steps.check-deploy.outputs.version != 'none'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${{ steps.check-deploy.outputs.version }}
+          tag_name="WindowsStudio64-${version}"
+          
+          # Create release
+          gh release create "$tag_name" \
+            --title "$version" \
+            --notes "WindowsStudio64 deployment artifacts for version $version" \
+            --draft=false \
+            || { echo "Failed to create release, continuing..."; exit 0; }
+          
+          # Upload log files
+          for file in deploy_log_WindowsStudio64.txt valid_urls_WindowsStudio64.txt archive_log_WindowsStudio64.txt; do
+            if [ -f "$file" ]; then
+              gh release upload "$tag_name" "$file" --clobber || echo "Failed to upload $file to release, continuing..."
+            fi
+          done
+          
+          # Upload downloaded packages
+          if [ -d "downloads/WindowsStudio64" ]; then
+            for file in downloads/WindowsStudio64/*; do
+              if [ -f "$file" ]; then
+                gh release upload "$tag_name" "$file" --clobber || echo "Failed to upload $file to release, continuing..."
+              fi
+            done
+          fi
         continue-on-error: true
