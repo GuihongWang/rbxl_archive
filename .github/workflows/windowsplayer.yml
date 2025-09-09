@@ -5,6 +5,9 @@ on:
     - cron: '0 0 * * *' # Run daily
   workflow_dispatch:
 
+permissions:
+  contents: write # Required for creating releases
+
 jobs:
   archive-windowsplayer:
     runs-on: ubuntu-latest
@@ -193,4 +196,36 @@ jobs:
         with:
           name: packages-WindowsPlayer
           path: downloads/WindowsPlayer/*
+        continue-on-error: true
+
+      - name: Create and upload to release
+        if: steps.check-deploy.outputs.updated == 'true' && steps.check-deploy.outputs.version != 'none'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${{ steps.check-deploy.outputs.version }}
+          tag_name="WindowsPlayer-${version}"
+          
+          # Create release
+          gh release create "$tag_name" \
+            --title "$version" \
+            --notes "WindowsPlayer deployment artifacts for version $version" \
+            --draft=false \
+            || { echo "Failed to create release, continuing..."; exit 0; }
+          
+          # Upload log files
+          for file in deploy_log_WindowsPlayer.txt valid_urls_WindowsPlayer.txt archive_log_WindowsPlayer.txt; do
+            if [ -f "$file" ]; then
+              gh release upload "$tag_name" "$file" --clobber || echo "Failed to upload $file to release, continuing..."
+            fi
+          done
+          
+          # Upload downloaded packages
+          if [ -d "downloads/WindowsPlayer" ]; then
+            for file in downloads/WindowsPlayer/*; do
+              if [ -f "$file" ]; then
+                gh release upload "$tag_name" "$file" --clobber || echo "Failed to upload $file to release, continuing..."
+              fi
+            done
+          fi
         continue-on-error: true
