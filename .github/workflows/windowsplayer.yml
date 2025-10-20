@@ -27,11 +27,6 @@ jobs:
         with:
           stack: dual   # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
 
-      - name: Install waybackpy
-        run: |
-          pip install waybackpy -U || echo "Failed to install waybackpy, continuing..."
-        continue-on-error: true
-
       - name: Download and check DeployHistory
         id: check-deploy
         run: |
@@ -87,7 +82,7 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Validate and archive package URLs
+      - name: Validate and download package URLs
         if: steps.check-deploy.outputs.updated == 'true' && steps.check-deploy.outputs.version != 'none'
         run: |
           binary_type=WindowsPlayer
@@ -117,66 +112,17 @@ jobs:
             if [ "$pkg_status" == "200" ]; then
               echo "Valid package: $pkg_url" | tee -a archive_log_${binary_type}.txt
               echo "$pkg_url" >> valid_urls_${binary_type}.txt
+              
+              # Download package
+              mkdir -p downloads/${binary_type}
+              filename=$(basename "$pkg_url")
+              echo "Downloading package: $pkg_url" | tee -a archive_log_${binary_type}.txt
+              curl -s -L -o "downloads/${binary_type}/${filename}" "$pkg_url" || echo "Failed to download $pkg_url, continuing..."
+              if [ $? -eq 0 ]; then
+                echo "Successfully downloaded package to downloads/${binary_type}/${filename}" | tee -a archive_log_${binary_type}.txt
+              fi
             fi
           done
-
-          # Archive URLs with retries
-          if [ -s valid_urls_${binary_type}.txt ]; then
-            grep -v '^$' valid_urls_${binary_type}.txt > valid_urls_${binary_type}_filtered.txt
-            mv valid_urls_${binary_type}_filtered.txt valid_urls_${binary_type}.txt
-            total_urls=$(wc -l < valid_urls_${binary_type}.txt)
-            url_count=0
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            
-            while read -r url; do
-              [ -z "$url" ] && { echo "Skipping empty URL" | tee -a archive_log_${binary_type}.txt; continue; }
-              url_count=$((url_count + 1))
-              echo "Archiving URL $url_count/$total_urls: $url" | tee -a archive_log_${binary_type}.txt
-              
-              # Attempt archiving with up to 3 retries
-              for attempt in {1..3}; do
-                waybackpy --url "$url" --user-agent "$user_agent" --save >> archive_log_${binary_type}.txt 2>&1
-                if [ $? -eq 0 ]; then
-                  echo "Successfully archived URL $url_count/$total_urls: $url (attempt $attempt)" | tee -a archive_log_${binary_type}.txt
-                  break
-                else
-                  echo "Failed to archive URL $url_count/$total_urls: $url (attempt $attempt)" | tee -a archive_log_${binary_type}.txt
-                  if [ $attempt -lt 3 ]; then
-                    echo "Retrying in 300 seconds..." | tee -a archive_log_${binary_type}.txt
-                    sleep 300
-                  fi
-                fi
-              done
-              if [ $? -ne 0 ]; then
-                echo "Failed to archive URL $url_count/$total_urls after 3 attempts: $url" | tee -a archive_log_${binary_type}.txt
-              fi
-            done < valid_urls_${binary_type}.txt
-          else
-            echo "No valid URLs to archive for $binary_type" | tee -a archive_log_${binary_type}.txt
-          fi
-        continue-on-error: true
-
-      - name: Download valid packages
-        if: steps.check-deploy.outputs.updated == 'true' && steps.check-deploy.outputs.version != 'none'
-        run: |
-          binary_type=WindowsPlayer
-          mkdir -p downloads/${binary_type}
-          if [ -s valid_urls_${binary_type}.txt ]; then
-            total_urls=$(wc -l < valid_urls_${binary_type}.txt)
-            url_count=0
-            while read -r url; do
-              [ -z "$url" ] && { echo "Skipping empty URL for download" | tee -a archive_log_${binary_type}.txt; continue; }
-              url_count=$((url_count + 1))
-              filename=$(basename "$url")
-              echo "Downloading package ($url_count/$total_urls): $url" | tee -a archive_log_${binary_type}.txt
-              curl -s -L -o "downloads/${binary_type}/${filename}" "$url" || echo "Failed to download $url, continuing..."
-              if [ $? -eq 0 ]; then
-                echo "Successfully downloaded package ($url_count/$total_urls): $url to downloads/${binary_type}/${filename}" | tee -a archive_log_${binary_type}.txt
-              fi
-            done < valid_urls_${binary_type}.txt
-          else
-            echo "No valid URLs to download for $binary_type" | tee -a archive_log_${binary_type}.txt
-          fi
         continue-on-error: true
 
       - name: Upload logs and valid URLs
