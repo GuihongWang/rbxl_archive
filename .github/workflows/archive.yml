@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
+    inputs:
+      force_rerun:
+        description: 'Ignore hash cache and force archiving even if DeployHistory is unchanged'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -102,6 +108,7 @@ jobs:
           deploy_url="${{ matrix.deploy_url }}"
           fallback_url="${{ matrix.fallback_url }}"
           type_filter="${{ matrix.type_filter }}"
+          force_rerun="${{ github.event.inputs.force_rerun == 'true' && 'true' || 'false' }}"
 
           echo "## Checking DeployHistory for ${target}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -128,8 +135,10 @@ jobs:
           current_hash=$(md5sum DeployHistory.txt | awk '{print $1}')
           echo "- Current hash: \`$current_hash\`" >> $GITHUB_STEP_SUMMARY
 
-          # Compare with previous hash
-          if [ -f last_hash.txt ]; then
+          # Compare with previous hash (skip entirely when force_rerun is set)
+          if [ "$force_rerun" = "true" ]; then
+            echo "- 🔁 Force rerun: ignoring hash cache" >> $GITHUB_STEP_SUMMARY
+          elif [ -f last_hash.txt ]; then
             previous_hash=$(cat last_hash.txt | tr -d '[:space:]')
             if [ "$current_hash" = "$previous_hash" ]; then
               echo "- ⏭️ DeployHistory unchanged since last run" >> $GITHUB_STEP_SUMMARY
