@@ -215,6 +215,9 @@ jobs:
             echo "Fetching manifest: $manifest_url" | tee -a archive_log.txt
             curl -s -o rbxPkgManifest.txt "$manifest_url"
 
+            # Normalize CRLF -> LF (Roblox CDN manifest uses CRLF line endings)
+            tr -d '\r' < rbxPkgManifest.txt > rbxPkgManifest.tmp && mv rbxPkgManifest.tmp rbxPkgManifest.txt
+
             # Validate manifest content
             if [ ! -s rbxPkgManifest.txt ] || ! head -1 rbxPkgManifest.txt | grep -q '^v0'; then
               echo "::warning::Manifest missing or invalid for $target"
@@ -227,7 +230,7 @@ jobs:
             checked_count=$((checked_count + 1))
 
             # Extract package filenames from manifest (lines ending in .zip)
-            packages_from_manifest=$(grep '\.zip$' rbxPkgManifest.txt)
+            packages_from_manifest=$(grep '\.zip$' rbxPkgManifest.txt || true)
 
             if [ -z "$packages_from_manifest" ]; then
               echo "::warning::No .zip packages found in manifest for $target"
